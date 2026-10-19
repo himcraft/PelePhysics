@@ -194,6 +194,7 @@ Currently, the list of diagnostic contains:
 * ``DiagPDF`` : extract the PDF of a given variable and write it to an ASCII file.
 * ``DiagConditional`` : extract statistics (average and standard deviation, integral or sum) of a
   set of variables conditioned on the value of given variable and write it to an ASCII file.
+* ``DiagPoint`` : record selected cell-centered fields at a fixed physical position in 2D or 3D.
 
 When using `DiagPDF` or `DiagConditional`, it is possible to narrow down the diagnostic to a region of interest
 by specifying a set of filters, defining a range of interest for a variable. Note also that for these two diagnostics,
@@ -245,6 +246,57 @@ The following provide examples for each diagnostic in PeleLMeX (in PeleC, all di
     peleLM.pdfTest.range = 0.0 2.0                                  # [OPT, DEF=data min/max] Specify the range of the PDF
     peleLM.pdfTest.field_name = x_velocity                          # Variable of interest
 
+
+Fixed-point diagnostics
+~~~~~~~~~~~~~~~~~~~~~~~
+
+``DiagPoint`` inherits from ``DiagBase`` and is registered with the identifier ``DiagPoint``.
+The host solver supplies the AMR geometry, grids, distribution mappings, named fields, step,
+and time through the same interface as the other diagnostics. For example, in PeleLMeX::
+
+    peleLM.diagnostics = probe1
+    peleLM.probe1.type = DiagPoint
+    peleLM.probe1.position = 0.005 0.002
+    peleLM.probe1.field_names = density temp
+    peleLM.probe1.int = 1
+    peleLM.probe1.file = probe1.dat
+
+Use the ``pelec`` prefix in PeleC and its field names, for example ``Temp`` for temperature.
+Supply two coordinates in 2D and three in 3D. Coordinates and values retain the host's native
+units. Each instance samples one point; give separate instances separate output filenames.
+If ``file`` is omitted, the instance name is used as the filename. ``int`` must be a positive
+step interval. ``per`` scheduling and diagnostic filters are not supported.
+
+The diagnostic selects the finest valid cell containing the point, and refreshes its level,
+grid index, and owning MPI rank in every ``prepare`` call. Values are copied safely from device
+memory on the owning rank and collected on the I/O rank. No particles or spatial interpolation
+are required: finite-volume quantities are the stored cell averages. At an internal cell face,
+the upper-coordinate cell is selected. The physical upper boundary selects the last interior
+cell. Out-of-domain positions are rejected.
+
+For EB data, the optional ``volume_fraction_field`` can name a host-provided volume fraction
+field. A selected cell with nonpositive fluid volume fraction is then rejected. For PeleC::
+
+    pelec.probe1.volume_fraction_field = vfrac
+
+This check is disabled by default, and the shared diagnostic does not assume a particular
+volume-fraction field name. For cut cells, values represent the cell's fluid portion; there is
+no subcell geometry test. All supplied MultiFabs must be cell-centered.
+
+The ASCII file has two comment header lines identifying the position and columns. Columns are
+``step time x y [z] level cell_x cell_y [cell_z]`` followed by the requested fields in their
+specified order. Cell coordinates are geometric centers and ``level`` starts at zero.
+
+Existing files are appended after validating the position and columns. The final step/time
+pair is not duplicated. Older or inconsistent records and malformed/incomplete histories are
+rejected; use a new file when restarting from an earlier checkpoint. The host must supply the
+actual snapshot time, including at initialization. Output frequency and field preparation cost
+depend on the host solver's diagnostic scheduling and data preparation.
+
+Standalone behavior tests are in ``Testing/Diagnostics/DiagPoint``. The fixed-probe concept is
+also used in `WarpX FieldProbe
+<https://github.com/BLAST-WarpX/warpx/blob/development/Source/Diagnostics/ReducedDiags/FieldProbe.cpp>`_,
+whose electromagnetic fields, particle gather, and moving-window interfaces are WarpX-specific.
 
 Filter
 ======
